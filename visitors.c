@@ -2826,7 +2826,7 @@ void vi_print_domain_referrers(FILE *fp, struct vih *vih)
 {
 	vi_print_generic_keyval_report(
 			fp,
-			"Referrer domains",
+			"Domain referrals",
 			"Referrerals by domain, counted by visits",
 			"Domains",
 			Config_max_domain_referrers,
