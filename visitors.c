@@ -6,6 +6,7 @@
  * This software is released under the terms of the GPL license version 2.
  * Read the COPYING file in this distribution for more details. */
 
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -65,6 +66,7 @@ struct vih {
 	struct hashtable month;
 	struct hashtable googlemonth;
 	struct hashtable agents;
+    struct hashtable domain_referrers;
 	struct hashtable googled;
 	struct hashtable googlevisits;
 	struct hashtable googlekeyphrases;
@@ -137,6 +139,7 @@ int Config_max_pages = 20;
 int Config_max_images = 20;
 int Config_max_error404 = 20;
 int Config_max_agents = 20;
+int Config_max_domain_referrers = 20;
 int Config_max_googled = 20;
 int Config_max_adsensed = 20;
 int Config_max_google_keyphrases = 20;
@@ -145,6 +148,7 @@ int Config_max_trails = 20;
 int Config_max_tld = 20;
 int Config_max_robots = 20;
 int Config_process_agents = 0;
+int Config_process_domain_referrers = 0;
 int Config_process_google = 0;
 int Config_process_google_keyphrases = 0;
 int Config_process_google_keyphrases_age = 0;
@@ -822,6 +826,7 @@ void vi_reset_hashtables(struct vih *vih)
 	ht_destroy(&vih->referers);
 	ht_destroy(&vih->referersage);
 	ht_destroy(&vih->agents);
+	ht_destroy(&vih->domain_referrers);
 	ht_destroy(&vih->googled);
 	ht_destroy(&vih->adsensed);
 	ht_destroy(&vih->googlekeyphrases);
@@ -876,6 +881,7 @@ struct vih *vi_new(void)
 	vi_ht_init(&vih->referers);
 	vi_ht_init(&vih->referersage);
 	vi_ht_init(&vih->agents);
+	vi_ht_init(&vih->domain_referrers);
 	vi_ht_init(&vih->googled);
 	vi_ht_init(&vih->adsensed);
 	vi_ht_init(&vih->googlevisits);
@@ -1387,6 +1393,30 @@ int vi_process_agents(struct vih *vih, char *agent)
 	return 0;
 }
 
+int vi_process_domain_referrers(struct vih *vih, char* ref)
+{
+    if (!ref) return 0;
+	int res;
+
+    /* TODO: extract domain */
+    char* start = strstr(ref, "://");
+    if (!start) return 0;
+    if (strlen(start) < 6) return 0;
+    start += 3;
+
+    char *end = strchrnul(start, '/');
+    size_t len = end - start;
+    char *domain = (char*) malloc(len + 1);
+    strncpy(domain, start, len + 1);
+    domain[len] = 0;
+
+	res = vi_counter_incr(&vih->domain_referrers, domain);
+    free(domain);
+
+	if (res == 0) return 1;
+	return 0;
+}
+
 /* Match the list of keywords 't' against the string 's', and if
  * a match is found increment the matching keyword in the hashtable.
  * Return zero on success, non-zero on out of memory . */
@@ -1739,6 +1769,10 @@ int vi_process_line(struct vih *vih, char *l)
 		if (vi_process_referer(vih, ll.ref, ll.time)) goto oom;
 		if (Config_process_agents &&
 		    vi_process_agents(vih, ll.agent)) goto oom;
+        if (Config_process_domain_referrers
+                && !vi_is_internal_link(ll.ref)
+                && !vi_is_google_link(ll.ref)
+		        && vi_process_domain_referrers(vih, ll.ref)) goto oom;
 		if (Config_process_os &&
 		    vi_process_os(vih, ll.agent)) goto oom;
 		if (Config_process_browsers &&
@@ -2788,6 +2822,18 @@ void vi_print_agents_report(FILE *fp, struct vih *vih)
 			qsort_cmp_long_value);
 }
 
+void vi_print_domain_referrers(FILE *fp, struct vih *vih)
+{
+	vi_print_generic_keyval_report(
+			fp,
+			"Referrer domains",
+			"Referrerals by domain, counted by visits",
+			"Domains",
+			Config_max_domain_referrers,
+			&vih->domain_referrers,
+			qsort_cmp_long_value);
+}
+
 void vi_print_os_report(FILE *fp, struct vih *vih)
 {
 	vi_print_generic_keyvalbar_report(
@@ -3007,6 +3053,7 @@ void vi_print_report_links(FILE *fp)
 	"Referers by first time", &Config_process_referers_age,
 	"Robots and web spiders", &Config_process_robots,
 	"User agents", &Config_process_agents,
+    "Domain referrals", &Config_process_domain_referrers,
 	"Operating Systems", &Config_process_os,
 	"Browsers", &Config_process_browsers,
 	"404 Errors", &Config_process_error404,
@@ -3191,6 +3238,10 @@ int vi_print_report(char *of, struct vih *vih)
 		vi_print_agents_report(fp, vih);
 		vi_print_hline(fp);
 	}
+	if (Config_process_domain_referrers) {
+		vi_print_domain_referrers(fp, vih);
+		vi_print_hline(fp);
+	}
 	if (Config_process_os) {
 		vi_print_os_report(fp, vih);
 		vi_print_hline(fp);
@@ -3331,7 +3382,7 @@ void vi_stream_mode(struct vih *vih)
 /* ----------------------------------- main --------------------------------- */
 
 /* command line switche IDs */
-enum { OPT_MAXREFERERS, OPT_MAXPAGES, OPT_MAXIMAGES, OPT_USERAGENTS, OPT_ALL, OPT_MAXLINES, OPT_GOOGLE, OPT_MAXGOOGLED, OPT_MAXUSERAGENTS, OPT_OUTPUT, OPT_VERSION, OPT_HELP, OPT_PREFIX, OPT_TRAILS, OPT_GOOGLEKEYPHRASES, OPT_GOOGLEKEYPHRASESAGE, OPT_MAXGOOGLEKEYPHRASES, OPT_MAXGOOGLEKEYPHRASESAGE, OPT_MAXTRAILS, OPT_GRAPHVIZ, OPT_WEEKDAYHOUR_MAP, OPT_MONTHDAY_MAP, OPT_REFERERSAGE, OPT_MAXREFERERSAGE, OPT_TAIL, OPT_TLD, OPT_MAXTLD, OPT_STREAM, OPT_OUTPUTFILE, OPT_UPDATEEVERY, OPT_RESETEVERY, OPT_OS, OPT_BROWSERS, OPT_ERROR404, OPT_MAXERROR404, OPT_TIMEDELTA, OPT_PAGEVIEWS, OPT_ROBOTS, OPT_MAXROBOTS, OPT_GRAPHVIZ_ignorenode_GOOGLE, OPT_GRAPHVIZ_ignorenode_EXTERNAL, OPT_GRAPHVIZ_ignorenode_NOREFERER, OPT_GOOGLEHUMANLANGUAGE, OPT_FILTERSPAM, OPT_MAXADSENSED, OPT_GREP, OPT_EXCLUDE, OPT_IGNORE404, OPT_DEBUG, OPT_SCREENINFO};
+enum { OPT_MAXREFERERS, OPT_MAXPAGES, OPT_MAXIMAGES, OPT_USERAGENTS, OPT_DOMAIN_REFERRERS, OPT_ALL, OPT_MAXLINES, OPT_GOOGLE, OPT_MAXGOOGLED, OPT_MAXUSERAGENTS, OPT_OUTPUT, OPT_VERSION, OPT_HELP, OPT_PREFIX, OPT_TRAILS, OPT_GOOGLEKEYPHRASES, OPT_GOOGLEKEYPHRASESAGE, OPT_MAXGOOGLEKEYPHRASES, OPT_MAXGOOGLEKEYPHRASESAGE, OPT_MAXTRAILS, OPT_GRAPHVIZ, OPT_WEEKDAYHOUR_MAP, OPT_MONTHDAY_MAP, OPT_REFERERSAGE, OPT_MAXREFERERSAGE, OPT_TAIL, OPT_TLD, OPT_MAXTLD, OPT_STREAM, OPT_OUTPUTFILE, OPT_UPDATEEVERY, OPT_RESETEVERY, OPT_OS, OPT_BROWSERS, OPT_ERROR404, OPT_MAXERROR404, OPT_TIMEDELTA, OPT_PAGEVIEWS, OPT_ROBOTS, OPT_MAXROBOTS, OPT_GRAPHVIZ_ignorenode_GOOGLE, OPT_GRAPHVIZ_ignorenode_EXTERNAL, OPT_GRAPHVIZ_ignorenode_NOREFERER, OPT_GOOGLEHUMANLANGUAGE, OPT_FILTERSPAM, OPT_MAXADSENSED, OPT_GREP, OPT_EXCLUDE, OPT_IGNORE404, OPT_DEBUG, OPT_SCREENINFO};
 
 /* command line switches definition:
  * the rule with short options is to take upper case the
@@ -3344,6 +3395,7 @@ static struct ago_optlist visitors_optlist[] = {
 	{ 'Z',	"google-keyphrases-age", OPT_GOOGLEKEYPHRASESAGE, AGO_NOARG},
         { 'H',  "google-human-language", OPT_GOOGLEHUMANLANGUAGE, AGO_NOARG},
 	{ 'U',	"user-agents",		OPT_USERAGENTS,		AGO_NOARG},
+    { 'F',   "domain-referrers", OPT_DOMAIN_REFERRERS, AGO_NOARG},
 	{ 'W',  "weekday-hour-map",	OPT_WEEKDAYHOUR_MAP,	AGO_NOARG},
 	{ 'M',  "month-day-map",	OPT_MONTHDAY_MAP,	AGO_NOARG},
 	{ 'R',  "referers-age",		OPT_REFERERSAGE,	AGO_NOARG},
@@ -3455,6 +3507,9 @@ int main(int argc, char **argv)
 		case OPT_MAXUSERAGENTS:
 			Config_max_agents = atoi(ago_optarg);
 			break;
+/*        case OPT_MAXDOMAIN_REFFERERS:
+			Config_max_domain_referrers = atoi(ago_optarg);
+			break; */
 		case OPT_MAXTRAILS:
 			Config_max_trails = atoi(ago_optarg);
 			break;
@@ -3481,6 +3536,9 @@ int main(int argc, char **argv)
 			break;
 		case OPT_USERAGENTS:
 			Config_process_agents = 1;
+			break;
+		case OPT_DOMAIN_REFERRERS:
+			Config_process_domain_referrers = 1;
 			break;
 		case OPT_GOOGLE:
 			Config_process_google = 1;
@@ -3515,6 +3573,7 @@ int main(int argc, char **argv)
 			break;
 		case OPT_ALL:
 			Config_process_agents = 1;
+            Config_process_domain_referrers = 1;
 			Config_process_google = 1;
 			Config_process_google_keyphrases = 1;
 			Config_process_google_keyphrases_age = 1;
@@ -3551,6 +3610,7 @@ int main(int argc, char **argv)
 				Config_max_images = aux;
 				Config_max_error404 = aux;
 				Config_max_agents = aux;
+				Config_max_domain_referrers = aux;
 				Config_max_googled = aux;
 				Config_max_adsensed = aux;
 				Config_max_trails = aux;
