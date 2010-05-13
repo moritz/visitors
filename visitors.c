@@ -219,7 +219,7 @@ void ConfigAddGrepPattern(char *pattern, int type)
  * so may be fooled. */
 int vi_is_google_link(char *s)
 {
-	return !strncmp(s, "http://www.google.", 18);
+	return !strncmp(s, "http://www.google.", 18) || !strncmp(s, "http://images.google.", 21);
 }
 
 /* Returns non-zero if the user agent appears to be the GoogleBot. */
@@ -291,6 +291,9 @@ int vi_is_internal_link(char *url)
 /* returns non-zero if the URL 's' seems an image or a CSS file. */
 int vi_is_image(char *s)
 {
+	if (strstr(s, "/images/")){
+		return 1;
+	}
 	int l = strlen(s);
 	char *end = s + l; /* point to the nul term */
 
@@ -322,6 +325,10 @@ int vi_is_pageview(char *s)
 	char *dot, *slash;
 
 	if (s[l-1] == '/') return 1;
+
+	if (strstr(s, "/images/")){
+		return 0;
+	}
 	if (l >= 6 &&
 	    (!memcmp(end-5, ".html", 5) || 
 	    !memcmp(end-4, ".htm", 4) || 
@@ -1441,6 +1448,7 @@ int vi_process_browsers(struct vih *vih, char *agent)
 		"Galeon", NULL,
 		"Firefox", NULL,
 		"MultiZilla", NULL,
+		"Epiphany", NULL,
 		"Gecko", "Other Mozilla based",
 		"Wget", NULL,
 		"Lynx", NULL,
@@ -1460,6 +1468,7 @@ int vi_process_browsers(struct vih *vih, char *agent)
 		"NSPlayer", NULL,
 		"Googlebot", "GoogleBot",
 		"googlebot", "GoogleBot",
+		"-", "None",
 		"", "Unknown",
 		NULL, NULL,
 	};
@@ -1512,15 +1521,16 @@ int vi_process_google_keyphrases(struct vih *vih, char *ref, time_t age)
 {
 	char *s, *p, *e;
 	int res, page;
+	char intermediate_urldecoded[VI_LINE_MAX];
 	char urldecoded[VI_LINE_MAX];
 	char buf[64];
 
 	if (!vi_is_google_link(ref)) return 0;
-        /* Try to process gogoe human language info first. */
+        /* Try to process google human language info first. */
         if (Config_process_google_human_language) {
             s = strstr(ref+18, "&hl=");
             if (s == NULL) s = strstr(ref+18, "?hl=");
-            if (s && s[4] && s[5]) {
+            if (s && s[4] && s[5] && s[4] != '&') {
                 buf[0] = s[4];
                 buf[1] = s[5];
                 buf[2] = '\0';
@@ -1529,23 +1539,43 @@ int vi_process_google_keyphrases(struct vih *vih, char *ref, time_t age)
             }
         }
 
-	/* It's possible to start the search for the query 18 chars
-	 * after the start of the referer because all the
-	 * google links will start with "http://www.google.". */
-	if ((s = strstr(ref+18, "?q=")) == NULL &&
-	    (s = strstr(ref+18, "&q=")) == NULL) return 0;
-	if ((p = strstr(ref+18, "&start=")) == NULL)
-		p = strstr(ref+18, "?start=");
-	if ((e = strchr(s+3, '&')) != NULL)
-		*e = '\0';
-	if (p && (e = strchr(p+7, '&')) != NULL)
-		*e = '\0';
-	if (!strncmp(s+3, "cache:", 6))
-		return !vi_counter_incr(&vih->googlekeyphrases, "Google Cache Access");
-	vi_urldecode(urldecoded, s+3, VI_LINE_MAX);
-	vi_strtolower(urldecoded);
-	page = p ? (1+(atoi(p+7)/10)) : 1;
-	snprintf(buf, 64, " (page %d)", page);
+
+	if (0 == strncmp("http://images.google.", ref, 20)){
+		/* Google image search */
+		if ((s = strstr(ref+20, "q%3D")) == NULL && 
+			(s = strstr(ref+20, "q%3d")) == NULL) return 0;
+		vi_urldecode(intermediate_urldecoded, s+4, VI_LINE_MAX);
+		vi_strtolower(intermediate_urldecoded);
+		if ((e = strchr(intermediate_urldecoded, '&')) != NULL)
+			*e = '\0';
+		vi_urldecode(urldecoded, intermediate_urldecoded, VI_LINE_MAX);
+		snprintf(buf, 64, " (imagesearch)");
+		if ((p = strstr(intermediate_urldecoded, "&start=")) == NULL)
+			p = strstr(intermediate_urldecoded, "?start=");
+		if (p && (e = strchr(p+7, '&')) != NULL)
+			*e = '\0';
+		
+
+	} else {
+		/* It's possible to start the search for the query 18 chars
+		 * after the start of the referer because all the
+		 * google links will start with "http://www.google.". */
+
+		if ((s = strstr(ref+17, "?q=")) == NULL &&
+	        (s = strstr(ref+17, "&q=")) == NULL) return 0;
+		if ((p = strstr(ref+17, "&start=")) == NULL)
+			p = strstr(ref+17, "?start=");
+		if ((e = strchr(s+3, '&')) != NULL)
+			*e = '\0';
+		if (p && (e = strchr(p+7, '&')) != NULL)
+			*e = '\0';
+		if (!strncmp(s+3, "cache:", 6))
+			return !vi_counter_incr(&vih->googlekeyphrases, "Google Cache Access");
+		vi_urldecode(urldecoded, s+3, VI_LINE_MAX);
+		vi_strtolower(urldecoded);
+		page = p ? (1+(atoi(p+7)/10)) : 1;
+		snprintf(buf, 64, " (page %d)", page);
+	}
 	buf[63] = '\0';
 	vi_strlcat(urldecoded, buf, VI_LINE_MAX);
 	res = vi_counter_incr(&vih->googlekeyphrases, urldecoded);
@@ -1675,7 +1705,7 @@ int vi_process_line(struct vih *vih, char *l)
 		    vi_process_error404(vih, origline, ll.req, &is404))
                         goto oom;
                 /* Process screen info if needed. */
-                if (Config_process_screen_info && is404)
+                if (Config_process_screen_info)
                     if (vi_process_screen_info(vih, ll.req)) goto oom;
                 /* 404 error AND --ignore-404? Stop processing of this line. */
                 if (Config_ignore_404 && is404)
