@@ -1,0 +1,38 @@
+Usage: visitors [options] <filename> [<filename> ...]
+Available options:
+  -A --all                            
+  -T --trails                         
+  -G --google                         
+  -K --google-keyphrases              
+  -U --user-agents                    
+  -W --weekday-hour-map               
+  -R --referers-age                   
+  -D --domains                        
+  -O --operating-systems              
+  -B --browsers                       
+  -X --error404                       
+  -P --pageviews                      
+     --stream                         
+     --update-every                   <argument>
+     --reset-every                    <argument>
+  -f --output-file                    <argument>
+  -m --max-lines                      <argument>
+  -r --max-referers                   <argument>
+  -p --max-pages                      <argument>
+  -i --max-images                     <argument>
+  -x --max-error404                   <argument>
+  -u --max-useragents                 <argument>
+  -t --max-trails                     <argument>
+  -g --max-googled                    <argument>
+  -k --max-google-keyphrases          <argument>
+  -a --max-referers-age               <argument>
+  -d --max-domains                    <argument>
+  -P --prefix                         <argument>
+  -o --output                         <argument>
+  -V --graphviz                       
+  -v --version                        
+     --tail                           
+     --time-delta                     <argument>
+  -h --help                           
+For more information visit http://www.hping.org/visitors
+Visitors is Copyright(C) 2004 Salvatore Sanfilippo <antirez@invece.org>
